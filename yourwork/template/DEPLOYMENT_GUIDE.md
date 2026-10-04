@@ -5,7 +5,7 @@
 このガイドでは、[Nx Plugin for AWS](https://awslabs.github.io/nx-plugin-for-aws/) で生成したモックアプリを作成し、AWS にデプロイして削除するまでの手順を説明します。成果物は `yourwork/product/` に作ります。
 
 - ランディングページ（`/`）とアプリ本体（`/app` 配下）を 1 つの website プロジェクトで管理します。
-- インフラは CDK で定義し、`pnpm nx deploy-sandbox infra` の 1 コマンドでビルドからデプロイまで実行します。
+- インフラは CDK で定義し、`AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` の 1 コマンドでビルドからデプロイまで実行します。
 
 ## 技術スタック
 
@@ -31,7 +31,8 @@
 
 ### リージョン
 
-- モック本体は AWS プロファイルの既定リージョン（`CDK_DEFAULT_REGION`）にデプロイされます。環境変数 `AWS_REGION` が設定されているとそちらが優先されるので注意してください。
+- デプロイ・削除のコマンドには、毎回 `AWS_REGION=<デプロイ先リージョン>` を付けてリージョンを明示します。CDK はプロファイルの既定リージョンより環境変数 `AWS_REGION` を優先するため、シェル（エージェントのシェルを含む）に別の値が入っていると、意図しないリージョンにデプロイされます。
+- `<デプロイ先リージョン>` は、初回は `aws configure get region` の値を使います。2 回目以降は、既存の `product-infra-sandbox-Application` と同じリージョンにします。別のリージョンで再デプロイすると、WAF スタックの更新が `UPDATE_FAILED` になります（トラブルシューティング参照）。
 - WAF は常に us-east-1 の別スタックに作られます（CloudFront 用の WAF は us-east-1 にしか作れないため）。
 - Tracker は別のリージョンにあってもかまいません。エンドポイント URL で指定するだけです。
 
@@ -202,7 +203,7 @@ export class ApplicationStack extends Stack {
 ```
 
 - `TRACKER_SDK_ORIGIN` は Tracker SDK URL のスキームとホストだけを書きます（例 : `https://xxxxxxxx.cloudfront.net`、パスは付けない）。
-- Tracker の情報がまだ無い場合は `scriptSrc` を省略します。あとで追加したら `pnpm nx deploy-sandbox infra` を再実行します。
+- Tracker の情報がまだ無い場合は `scriptSrc` を省略します。あとで追加したら `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を再実行します。
 
 ### 7. CDK bootstrap（初回のみ）
 
@@ -223,8 +224,8 @@ pnpm install
 # ビルド（Biome、Vitest、checkov を含む）
 pnpm nx run-many -t build
 
-# デプロイ（ビルドも実行される）
-pnpm nx deploy-sandbox infra
+# デプロイ（ビルドも実行される）。リージョンは毎回明示する
+AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra
 ```
 
 デプロイすると次の 2 スタックが作られます。初回デプロイは 4 分前後かかります。
@@ -240,11 +241,12 @@ pnpm nx deploy-sandbox infra
 
 ```bash
 aws cloudformation describe-stacks \
+  --region <デプロイ先リージョン> \
   --stack-name product-infra-sandbox-Application \
   --query 'Stacks[0].Outputs'
 ```
 
-アプリを更新したときも `pnpm nx deploy-sandbox infra` を再実行するだけです。
+アプリを更新したときも、同じリージョンを指定して `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を再実行するだけです。
 
 ## セキュリティ設定
 
@@ -297,10 +299,10 @@ S3 バケットは非公開で、CloudFront 経由でのみアクセスされま
 `product/` で次を実行します。
 
 ```bash
-pnpm nx destroy-sandbox infra
+AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra
 ```
 
-確認（y/n）を求められます。エージェントに実行させる場合など TTY の無いシェルでは確認できずに `TtyNotAttached` で失敗するので、`pnpm nx destroy-sandbox infra -- --force` を使います。
+確認（y/n）を求められます。エージェントに実行させる場合など TTY の無いシェルでは確認できずに `TtyNotAttached` で失敗するので、`AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force` を使います。
 
 
 - S3 バケットは autoDeleteObjects 付きなので、手で空にする必要はありません。
@@ -368,4 +370,8 @@ infra の checkov が uv を必要とします。uv をインストールして�
 
 ### 意図しないリージョンにデプロイされる
 
-環境変数 `AWS_REGION` がプロファイルの既定リージョンより優先されています。`echo $AWS_REGION` で確認し、不要なら `unset AWS_REGION` してからデプロイします。
+環境変数 `AWS_REGION` がプロファイルの既定リージョンより優先されています。`echo $AWS_REGION` で確認できます。デプロイのコマンドに `AWS_REGION=<デプロイ先リージョン>` を付けて明示してください。
+
+### 再デプロイで WAF スタックが `UPDATE_FAILED` になる
+
+`Cannot delete export ...WebAclArn... as it is in use by product-infra-sandbox-Application` が出る場合は、前回と別のリージョンで合成されています。CDK がリージョンをまたぐ参照に切り替え、既存スタックが使っている export を削除しようとして拒否されます。既存の `product-infra-sandbox-Application` があるリージョンを `AWS_REGION=` で指定して再デプロイすると解消します。失敗した時点ではリソースは変更されていません。

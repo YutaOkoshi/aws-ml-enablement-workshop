@@ -20,7 +20,7 @@ description: PR/FAQ からワークショップ用のモック Web アプリを�
 - `packages/website/src/config.ts` の Tracker 接続情報（API Endpoint / API Key など）
 - `packages/infra/src/stacks/application-stack.ts` の `scriptSrc`（Tracker SDK URL のオリジン）
 
-差し替えたら `product/` で `pnpm nx deploy-sandbox infra` を再実行します。
+差し替えたら `product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を再実行します。リージョンは既存の `product-infra-sandbox-Application` と同じ値にします（`product/construction/plan.md` に記録したもの）。
 
 ## 2. prompt.md を読んで実行する
 

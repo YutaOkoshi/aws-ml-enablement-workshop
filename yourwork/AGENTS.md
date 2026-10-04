@@ -34,8 +34,8 @@
 | ビルド（完了条件） | `pnpm nx run-many -t build` |
 | 整形の自動修正 | `pnpm lint`（Biome の整形漏れで build が失敗したとき） |
 | 初回のみ | `pnpm nx bootstrap infra` |
-| デプロイ | `pnpm nx deploy-sandbox infra` |
-| 削除 | `pnpm nx destroy-sandbox infra -- --force`（明示的な指示があったときだけ。TTY の無いシェルでは `--force` が無いと `TtyNotAttached` で失敗する） |
+| デプロイ | `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra`（リージョンは毎回明示する。シェルの `AWS_REGION` が別の値だと意図しないリージョンへデプロイされ、2 回目以降は WAF スタックが `UPDATE_FAILED` になる） |
+| 削除 | `AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force`（明示的な指示があったときだけ。TTY の無いシェルでは `--force` が無いと `TtyNotAttached` で失敗する） |
 
 ## このディレクトリでの決めごと
 
@@ -43,7 +43,7 @@
 - **CSP に合わせて Tracker を組み込みます。** CloudFront の CSP は `script-src 'self'` なので、SDK のオリジンを `static-website.ts` の `scriptSrc` 経由で `script-src` に追加します。初期化は index.html のインライン script ではなく `packages/website/src/` の TypeScript から行います。インライン script は CSP で実行されません。
 - **Tracker 以外はモックで実装します。** バックエンド API・データベース・外部サービス連携はモック実装にし、MVP として画面が一通り動くことを内部設計の作り込みより先に成立させます。Tracker だけは本物の SDK と本物のエンドポイントを使います。
 - **`template/` 配下と `tracker/` 配下は編集しません。** どちらも参加者全員が共有する配布物で、書き換えると他の参加者の手順と食い違います。変更は `product/` に閉じてください。
-- **削除はユーザーの明示的な指示があったときだけ行います。** `product/` で `pnpm nx destroy-sandbox infra -- --force` を実行し、デプロイ先リージョンと us-east-1（WAF）の両方で `product-infra-sandbox-` のスタックが残っていないことを確認します。
+- **削除はユーザーの明示的な指示があったときだけ行います。** `product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force` を実行し、デプロイ先リージョンと us-east-1（WAF）の両方で `product-infra-sandbox-` のスタックが残っていないことを確認します。
 - 画面に出るテキストは、特別な指定がない限り日本語にします。
 
 ## 完了条件

@@ -59,7 +59,7 @@ initTracker();
 ```
 
 #### ステップ2: CSP の `script-src` に SDK のオリジンを追加する
-`packages/infra/src/stacks/application-stack.ts` の `TRACKER_SDK_ORIGIN` に SDK URL の**スキーム+ホスト**（例 `https://xxxxxxxx.cloudfront.net`、パスなし）を書き、`new Website(this, 'Website', { scriptSrc: [TRACKER_SDK_ORIGIN] })` で渡します。あとから追加・変更した場合は `pnpm nx deploy-sandbox infra` を再実行します。
+`packages/infra/src/stacks/application-stack.ts` の `TRACKER_SDK_ORIGIN` に SDK URL の**スキーム+ホスト**（例 `https://xxxxxxxx.cloudfront.net`、パスなし）を書き、`new Website(this, 'Website', { scriptSrc: [TRACKER_SDK_ORIGIN] })` で渡します。あとから追加・変更した場合は `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を再実行します（リージョンは前回のデプロイと揃えます）。
 
 > CSP は CloudFront のレスポンスヘッダーで付くため、`pnpm dev` では問題が出ず、デプロイ後に初めてブロックされます。
 
@@ -371,14 +371,14 @@ if (window.MLEWTracker) {
 - `Refused to execute inline script` — インライン script がブロックされた
 
 **原因と解決**:
-- `Refused to load the script`: CSP の `script-src` に SDK のオリジンが無い。`application-stack.ts` の `TRACKER_SDK_ORIGIN` に SDK URL のスキーム+ホスト（パスなし）を書いて `scriptSrc` に渡し、`pnpm nx deploy-sandbox infra` を再実行する。オリジンが index.html の SDK URL と一致しているかも確認する
+- `Refused to load the script`: CSP の `script-src` に SDK のオリジンが無い。`application-stack.ts` の `TRACKER_SDK_ORIGIN` に SDK URL のスキーム+ホスト（パスなし）を書いて `scriptSrc` に渡し、`AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を再実行する。オリジンが index.html の SDK URL と一致しているかも確認する
 - `Refused to execute inline script`: index.html のインライン script で初期化している。初期化を `mlewTracker.ts` の `initTracker()` に移し、`main.tsx` から呼ぶ
 
 ### SDK URL に Dashboard のドメインを使ってしまった場合
 
 **症状**: `MLEW Tracker SDK not loaded` が出る、またはイベントが期待どおりに記録されない
 **原因**: Tracker デプロイ完了通知の「Dashboard URL」のドメインで `tracker-sdk.js` を指定している（ダッシュボード側にあった SDK は古いビルドのコピーで、リポジトリからは削除済み。ただし削除前にデプロイした Tracker では、再デプロイするまで Dashboard のドメインから古い SDK が配信され続けます）
-**解決**: 「Tracker SDK URL」（SDK 配信用 CloudFront）の値に直し、`TRACKER_SDK_ORIGIN` もそのオリジンに揃えて `pnpm nx deploy-sandbox infra` を再実行する
+**解決**: 「Tracker SDK URL」（SDK 配信用 CloudFront）の値に直し、`TRACKER_SDK_ORIGIN` もそのオリジンに揃えて `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を再実行する
 
 ### 403 Forbidden エラーが発生する場合
 

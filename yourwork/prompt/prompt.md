@@ -35,7 +35,7 @@
 - Node.js 22.12 以上（または 20.19 以上）。生成物の vite と nx がこれを要求するため、Node 18 では動きません。
 - pnpm。依存が `catalog:` 指定のため、npm では install できません。
 - uv。infra の build に含まれる checkov を `uvx` で実行するため、無いと `uvx: command not found` で build が失敗します。
-- AWS CLI v2 と認証情報。モック本体はプロファイルの既定リージョンにデプロイされます（環境変数 `AWS_REGION` があるとそちらが優先されます）。CloudFront 用の WAF は常に us-east-1 の別スタックになります。
+- AWS CLI v2 と認証情報。モック本体のデプロイ先リージョンは、デプロイ・削除のコマンドごとに `AWS_REGION=<デプロイ先リージョン>` を付けて明示します（下の Phase 2・削除を参照）。CloudFront 用の WAF は常に us-east-1 の別スタックになります。
 
 # 実装の方針
 
@@ -78,7 +78,7 @@ Nx Plugin for AWS で `product/` に雛形を作ります。次の順番で実�
    - KMS キーに `removalPolicy: RemovalPolicy.DESTROY` と `pendingWindow: Duration.days(7)` を付ける。既定は RETAIN のため、削除後もキーが残って課金が続きます
 6. `packages/infra/src/stacks/application-stack.ts` の ApplicationStack に Website を追加する（下のコード）。生成直後の ApplicationStack は空で、追加しないとデプロイしても何も作られません
    - `TRACKER_SDK_ORIGIN` には `<tracker_configuration>` の Tracker SDK URL のスキームとホストだけを入れます（例 `https://xxxxxxxx.cloudfront.net`、パスなし）
-   - Tracker 情報が未指定なら `scriptSrc` を省略します。index.html の SDK の script タグも置かず、`config.ts` の `tracker` は空文字で用意します（`mlewTracker.ts` が参照するため）。この場合、コンソールの `MLEW Tracker SDK not loaded` は想定どおりです。あとで追加したら、`pnpm nx deploy-sandbox infra` を再実行して CSP を更新します
+   - Tracker 情報が未指定なら `scriptSrc` を省略します。index.html の SDK の script タグも置かず、`config.ts` の `tracker` は空文字で用意します（`mlewTracker.ts` が参照するため）。この場合、コンソールの `MLEW Tracker SDK not loaded` は想定どおりです。あとで追加したら、`AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を再実行して CSP を更新します
 7. アカウントで初めて使う場合だけ `pnpm nx bootstrap infra` を実行する。引数なしの bootstrap は、デプロイ先リージョンと WAF 用の us-east-1 の両方を bootstrap します
 
 `static-website.ts` の改修:
@@ -136,7 +136,10 @@ export class ApplicationStack extends Stack {
 
 `product/construction/plan.md` にチェックボックス付きの実装計画を日本語で作成し、実装しながら進捗を更新します。ローカルでは `product/` で `pnpm dev` を実行し、http://localhost:4200 で確認します。本番ビルドの確認は `pnpm nx run @product/website:preview`（http://localhost:4300）で行えます。
 
-実装が固まったら、`product/` で `pnpm nx deploy-sandbox infra` を実行して AWS にデプロイします。初回は 4 分ほどかかります。デプロイ後の URL は、CDK の Outputs に出る `...WebsiteDistributionDomainName...` の値（`xxxx.cloudfront.net`）です。あとから確認するときは `aws cloudformation describe-stacks --stack-name product-infra-sandbox-Application --query 'Stacks[0].Outputs'` を使います。
+実装が固まったら、`product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を実行して AWS にデプロイします。初回は 4 分ほどかかります。
+
+- **リージョンは毎回明示します。** CDK はプロファイルの既定リージョンより環境変数 `AWS_REGION` を優先します。エージェントのシェルには、エージェント自身の設定に由来する `AWS_REGION` が入っていることがあり、そのままだと意図しないリージョンへデプロイされます。2 回目以降に別リージョンで合成されると、既存の WAF スタックの export 削除が拒否されて `UPDATE_FAILED` になります。
+- `<デプロイ先リージョン>` は、`product-infra-sandbox-Application` がすでにあればそのリージョン、無ければ `aws configure get region` の値を使います。決めたリージョンは `product/construction/plan.md` に書き、以降のデプロイ・削除で同じ値を使います。デプロイ後の URL は、CDK の Outputs に出る `...WebsiteDistributionDomainName...` の値（`xxxx.cloudfront.net`）です。あとから確認するときは `aws cloudformation describe-stacks --region <デプロイ先リージョン> --stack-name product-infra-sandbox-Application --query 'Stacks[0].Outputs'` を使います。
 
 # 完了条件
 
@@ -152,6 +155,6 @@ export class ApplicationStack extends Stack {
 
 ユーザーから明示的な削除指示があった場合にのみ実行します。デプロイしたままだと WAF と KMS キーの固定費（約 $8/月）がかかり続けます。
 
-1. `product/` で `pnpm nx destroy-sandbox infra -- --force` を実行する。`destroy-sandbox` の中身は確認付きの `cdk destroy` で、TTY の無いエージェントのシェルでは確認できずに `TtyNotAttached` で失敗するため、`--force` を付けます（`--` の後ろが cdk に渡ります）。バケットは autoDeleteObjects 付きなので、手で空にする必要はありません
+1. `product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force` を実行する。`destroy-sandbox` の中身は確認付きの `cdk destroy` で、TTY の無いエージェントのシェルでは確認できずに `TtyNotAttached` で失敗するため、`--force` を付けます（`--` の後ろが cdk に渡ります）。バケットは autoDeleteObjects 付きなので、手で空にする必要はありません
 2. デプロイ先リージョンと us-east-1 の両方で `aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE` を実行し、`product-infra-sandbox-` で始まるスタックが残っていないことを確認する。WAF のスタックは us-east-1 にあるため、デプロイ先だけ見ると取り残しに気付けません
 3. KMS キーは 7 日後に削除されます。削除待ちの間は課金されません
