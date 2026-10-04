@@ -8,7 +8,8 @@
 - Node.js 22.12 以上（または 20.19 以上）。生成物の vite と nx がこれを要求するため、Node 18 では動きません。
 - pnpm。依存が `catalog:` 指定のため、npm では install できません。
 - uv。infra の build に含まれる checkov を `uvx` で実行します。
-- AWS にデプロイする場合は、AWS CLI v2 と認証情報が設定済みで、アカウントが CDK bootstrap 済みであること（初回は `product/` で `pnpm nx bootstrap infra`）。
+- AWS にデプロイする場合は、AWS CLI v2 と認証情報が設定済みで、デプロイ先のアカウント×リージョンが CDK bootstrap 済みであること（初回は `product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx bootstrap infra`）。
+- デプロイ先リージョンは作業の最初に決め、`product/construction/plan.md` に記録して使い続けます（記録 → 既存の `product-infra-sandbox-Application` のリージョン → `aws configure get region` → ユーザーに確認、の順。詳細は `prompt/prompt.md` の Phase 1）。
 
 ## まず読むファイル
 
@@ -33,7 +34,7 @@
 | 本番ビルドの確認 | `pnpm nx run @product/website:preview`（http://localhost:4300） |
 | ビルド（完了条件） | `pnpm nx run-many -t build` |
 | 整形の自動修正 | `pnpm lint`（Biome の整形漏れで build が失敗したとき） |
-| 初回のみ | `pnpm nx bootstrap infra` |
+| bootstrap（アカウント×リージョンごとに初回のみ） | `AWS_REGION=<デプロイ先リージョン> pnpm nx bootstrap infra` |
 | デプロイ | `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra`（リージョンは毎回明示する。シェルの `AWS_REGION` が別の値だと意図しないリージョンへデプロイされ、2 回目以降は WAF スタックが `UPDATE_FAILED` になる） |
 | 削除 | `AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force`（明示的な指示があったときだけ。TTY の無いシェルでは `--force` が無いと `TtyNotAttached` で失敗する） |
 
@@ -43,7 +44,7 @@
 - **CSP に合わせて Tracker を組み込みます。** CloudFront の CSP は `script-src 'self'` なので、SDK のオリジンを `static-website.ts` の `scriptSrc` 経由で `script-src` に追加します。初期化は index.html のインライン script ではなく `packages/website/src/` の TypeScript から行います。インライン script は CSP で実行されません。
 - **Tracker 以外はモックで実装します。** バックエンド API・データベース・外部サービス連携はモック実装にし、MVP として画面が一通り動くことを内部設計の作り込みより先に成立させます。Tracker だけは本物の SDK と本物のエンドポイントを使います。
 - **`template/` 配下と `tracker/` 配下は編集しません。** どちらも参加者全員が共有する配布物で、書き換えると他の参加者の手順と食い違います。変更は `product/` に閉じてください。
-- **削除はユーザーの明示的な指示があったときだけ行います。** `product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force` を実行し、デプロイ先リージョンと us-east-1（WAF）の両方で `product-infra-sandbox-` のスタックが残っていないことを確認します。
+- **削除はユーザーの明示的な指示があったときだけ行います。** `product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force` を実行し、デプロイ先リージョンと us-east-1（WAF）の両方で `describe-stacks --region` を実行し、`product-infra-sandbox-` のスタックが存在しないことを確認します（状態で絞り込むと `DELETE_FAILED` などを見落とします。コマンドは `prompt/prompt.md` の「削除」）。
 - 画面に出るテキストは、特別な指定がない限り日本語にします。
 
 ## 完了条件

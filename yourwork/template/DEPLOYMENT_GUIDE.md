@@ -27,12 +27,12 @@
 | pnpm | `npm install -g pnpm` で導入し、`pnpm --version` で確認します。依存が `catalog:` 指定のため npm では install できません |
 | uv | infra のビルドに含まれる checkov を `uvx` で実行します。無いと `uvx: command not found` でビルドが失敗します |
 | AWS CLI v2 | 認証情報を設定し、`aws sts get-caller-identity` で確認します |
-| CDK bootstrap | アカウントごとに初回 1 回、`pnpm nx bootstrap infra` を実行します（手順は後述） |
+| CDK bootstrap | アカウント×リージョンごとに初回 1 回、`AWS_REGION=<デプロイ先リージョン> pnpm nx bootstrap infra` を実行します（手順は後述） |
 
 ### リージョン
 
 - デプロイ・削除のコマンドには、毎回 `AWS_REGION=<デプロイ先リージョン>` を付けてリージョンを明示します。CDK はプロファイルの既定リージョンより環境変数 `AWS_REGION` を優先するため、シェル（エージェントのシェルを含む）に別の値が入っていると、意図しないリージョンにデプロイされます。
-- `<デプロイ先リージョン>` は、初回は `aws configure get region` の値を使います。2 回目以降は、既存の `product-infra-sandbox-Application` と同じリージョンにします。別のリージョンで再デプロイすると、WAF スタックの更新が `UPDATE_FAILED` になります（トラブルシューティング参照）。
+- `<デプロイ先リージョン>` は、初回は `aws configure get region` の値を使います。値が空なら、エージェントは推測せずユーザーに聞きます（手動の場合は自分で決めて指定します）。2 回目以降は、既存の `product-infra-sandbox-Application` と同じリージョンにします。エージェントは選んだリージョンを `product/construction/plan.md` に記録します。別のリージョンで再デプロイすると、WAF スタックの更新が `UPDATE_FAILED` になります（トラブルシューティング参照）。
 - WAF は常に us-east-1 の別スタックに作られます（CloudFront 用の WAF は us-east-1 にしか作れないため）。
 - Tracker は別のリージョンにあってもかまいません。エンドポイント URL で指定するだけです。
 
@@ -103,7 +103,7 @@ yourwork/product/
   tracker: {
     applicationId: 'your-app-id',
     applicationName: 'あなたのアプリ名',
-    apiEndpoint: 'https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/dev',
+    apiEndpoint: 'https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/dev', // 末尾に / を付けない
     apiKey: 'xxxxxxxx',
   },
 ```
@@ -208,10 +208,10 @@ export class ApplicationStack extends Stack {
 ### 7. CDK bootstrap（初回のみ）
 
 ```bash
-pnpm nx bootstrap infra
+AWS_REGION=<デプロイ先リージョン> pnpm nx bootstrap infra
 ```
 
-アカウントごとに初回 1 回だけ実行します。引数なしの `cdk bootstrap` は、アプリがデプロイする全環境（デプロイ先リージョンと、WAF 用の us-east-1）を bootstrap します。
+アカウント×リージョンごとに初回 1 回だけ実行します。別のリージョンにデプロイする場合は、そのリージョンで改めて必要になるため、事前確認と当日で同じリージョンを使います。引数なしの `cdk bootstrap` は、アプリがデプロイする全環境（デプロイ先リージョンと、WAF 用の us-east-1）を bootstrap します。
 
 ## ビルドとデプロイ
 
@@ -304,17 +304,14 @@ AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra
 
 確認（y/n）を求められます。エージェントに実行させる場合など TTY の無いシェルでは確認できずに `TtyNotAttached` で失敗するので、`AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force` を使います。
 
-
 - S3 バケットは autoDeleteObjects 付きなので、手で空にする必要はありません。
-- 削除後、デプロイ先リージョンと us-east-1 の両方でスタックが残っていないことを確認します。`product-infra-sandbox-` で始まるスタックが出てこなければ完了です。
+- 削除後、デプロイ先リージョンと us-east-1 の両方でスタックが残っていないことを確認します。どちらも表が空なら完了です。`DELETE_FAILED` などで残っている場合も表に出ます。
 
 ```bash
-aws cloudformation list-stacks \
-  --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
-  --region <デプロイ先リージョン>
-aws cloudformation list-stacks \
-  --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
-  --region us-east-1
+aws cloudformation describe-stacks --region <デプロイ先リージョン> \
+  --query "Stacks[?starts_with(StackName,'product-infra-sandbox-')].[StackName,StackStatus]" --output table
+aws cloudformation describe-stacks --region us-east-1 \
+  --query "Stacks[?starts_with(StackName,'product-infra-sandbox-')].[StackName,StackStatus]" --output table
 ```
 
 - KMS キーは 7 日後に削除されます。削除待ちの間は課金されません。
@@ -366,7 +363,7 @@ infra の checkov が uv を必要とします。uv をインストールして�
 
 ### deploy で bootstrap のエラーが出る
 
-対象アカウントが CDK bootstrap されていません。`pnpm nx bootstrap infra` を実行してから、もう一度デプロイします。WAF 用の us-east-1 も対象になります。
+対象のアカウント×リージョンが CDK bootstrap されていません。`AWS_REGION=<デプロイ先リージョン> pnpm nx bootstrap infra` を実行してから、同じリージョンでもう一度デプロイします。WAF 用の us-east-1 も対象になります。
 
 ### 意図しないリージョンにデプロイされる
 

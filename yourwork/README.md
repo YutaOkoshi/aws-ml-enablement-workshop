@@ -293,7 +293,39 @@ Dashboard URL: https://dxxxxxxxxxx.cloudfront.net
 Tracker SDK URL: https://dyyyyyyyyyy.cloudfront.net/tracker-sdk.js
 ```
 
-これらの情報は `4. モック構築の実行` の Prompt 4.3 に貼り付けます。Dashboard URL と Tracker SDK URL はどちらも `cloudfront.net` ですがドメインが異なります。モックに組み込むのは **Tracker SDK URL** なので、取り違えないよう注意してください。
+これらの情報は `4. モック構築の実行` の Prompt 4.3 に貼り付けます。Dashboard URL と Tracker SDK URL はどちらも `cloudfront.net` ですがドメインが異なります。モックに組み込むのは **Tracker SDK URL** なので、取り違えないよう注意してください。API Endpoint の末尾には `/` を付けません。
+
+失敗した場合は「MLEW Tracker Deployment Failed」メール（ログへのリンク付き）が届きます。Tracker はアカウントに 1 つなので、同じアカウントで別リージョンにもう 1 つデプロイすることはできません。
+
+**完了メールが届かない・見失った場合**は、CDK が作る子スタック `MLEWTrackerStack-dev`（`dev` は `Environment` の値）から 4 つの値を取り直せます。
+
+```bash
+aws cloudformation describe-stacks --region ap-northeast-1 \
+  --stack-name MLEWTrackerStack-dev --query 'Stacks[0].Outputs'
+# ApiKeyId は ID なので、キーの値は次で取得する
+aws apigateway get-api-key --region ap-northeast-1 \
+  --api-key <ApiKeyId の値> --include-value --query value --output text
+```
+
+| 値 | 組み立て方 |
+| --- | --- |
+| API Endpoint | `ApiEndpoint` の値そのまま（末尾に `/` を付けない） |
+| API Key | 上の `get-api-key` の出力（`ApiKeyId` の値ではない） |
+| Dashboard URL | `https://` + `DashboardURL` の値 |
+| Tracker SDK URL | `https://` + `SdkDistributionDomain` の値 + `/tracker-sdk.js` |
+
+**Tracker を削除する場合**は、親スタックを削除します。子スタック `MLEWTrackerStack-dev` の削除も自動で始まります。
+
+```bash
+aws cloudformation delete-stack --region ap-northeast-1 --stack-name mlew-tracker-stack
+```
+
+子スタックの削除は非同期で 10〜20 分かかります。次のコマンドが `does not exist` のエラーを返せば完了です。`DELETE_FAILED` で止まった場合や削除が始まらない場合は、`aws cloudformation delete-stack --region ap-northeast-1 --stack-name MLEWTrackerStack-dev` で子スタックを直接削除します。
+
+```bash
+aws cloudformation describe-stacks --region ap-northeast-1 \
+  --stack-name MLEWTrackerStack-dev --query 'Stacks[0].StackStatus'
+```
 
 #### 3. 生成 AI ツールの起動
 
@@ -342,18 +374,27 @@ Claude Code では、このプロンプトを貼り付けると `mock-builder` �
 
 渡した内容をもとにアプリケーションが自動的に実装され、CDK（Nx Plugin for AWS）で作成した S3 + CloudFront + WAF でホスティングされます。WAF と KMS キーに 1 デプロイあたり月額 約 $8 の固定費がかかるので、使い終わったら削除してください。
 
-モック本体は AWS プロファイルの既定リージョンにデプロイされます（環境変数 `AWS_REGION` が設定されているとそちらが優先されます）。CloudFront 用の WAF は us-east-1 にしか作れないため、us-east-1 に別スタックとして作成されます。Tracker のリージョンとそろえる必要はありません。
+エージェントはモック本体のデプロイ・削除のたびに `AWS_REGION` でリージョンを明示し、選んだリージョンを `product/construction/plan.md` に記録します。プロファイルの既定リージョン（`aws configure get region`）が空の場合は、エージェントからリージョンを聞かれるので指定してください。事前確認と当日で同じリージョンを使うと、CDK bootstrap をやり直さずに済みます。CloudFront 用の WAF は us-east-1 にしか作れないため、us-east-1 に別スタックとして作成されます。Tracker のリージョンとそろえる必要はありません。
 
 #### 5. ホスティングしたアプリケーションの削除
 
 AWS にデプロイしたアプリケーションを削除したい場合は、Kiro CLI などの起動中の生成 AI ツールに、`product/ ディレクトリを参照し、デプロイしたアプリケーションを削除したい` と伝えてください。
 各種リソースの削除が行われます。
 
-手動で削除する場合は、`product/` で次のコマンドを実行します。
+手動で削除する場合は、`product/` で次のコマンドを実行します。`<デプロイ先リージョン>` は `product/construction/plan.md` に記録されたリージョンです。確認（y/n）が出るので `y` で進めます（エージェントに実行させる場合は、確認できずに失敗するため末尾に `-- --force` を付けます）。
 
 ```bash
 cd product
-pnpm nx destroy-sandbox infra
+AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra
+```
+
+続けて、デプロイ先リージョンと us-east-1（WAF）の両方でスタックが残っていないことを確認します。どちらも表が空なら完了です。
+
+```bash
+aws cloudformation describe-stacks --region <デプロイ先リージョン> \
+  --query "Stacks[?starts_with(StackName,'product-infra-sandbox-')].[StackName,StackStatus]" --output table
+aws cloudformation describe-stacks --region us-east-1 \
+  --query "Stacks[?starts_with(StackName,'product-infra-sandbox-')].[StackName,StackStatus]" --output table
 ```
 
 ## Test/Iterate

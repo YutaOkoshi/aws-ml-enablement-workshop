@@ -38,11 +38,13 @@ initTracker();
 `initTracker` の中身は下の「React/TypeScript サービス層の実装」の `mlewTracker.ts` です。
 
 ## 必要な情報
-担当者から以下の情報を受取ってください（Tracker デプロイ完了通知に記載されています）。
+参加者自身が [当日のガイド](/yourwork/README.md) の「2. Tracker システムのデプロイ」で Tracker をデプロイし、デプロイ完了通知メールで次の 4 つの値を受け取ります（メールが届かない場合の取り直し方も同じ箇所にあります）。
 - **SDK URL**: 「Tracker SDK URL」の値。`https://{ダミーURL}.cloudfront.net/tracker-sdk.js`（外部CDN必須）
   - ⚠️ **Dashboard URL のドメインではありません**。SDK 配信用の CloudFront です
-- **API Endpoint**: `https://api123456.execute-api.us-west-2.amazonaws.com/dev/`
+- **API Endpoint**: `https://api123456.execute-api.us-west-2.amazonaws.com/dev`
+  - 末尾に `/` を付けません。SDK は `{API Endpoint}/v1/events` に送信するため、`/` を付けると `//v1/events` になります
 - **API Key**: 認証キー（例: `YOUR_TRACKER_API_KEY`）
+- **Dashboard URL**: 計測結果を見るダッシュボード。モックには組み込みません
 
 ## 基本セットアップ
 
@@ -72,7 +74,7 @@ export default {
   tracker: {
     applicationId: 'your-app-name',
     applicationName: 'Your Application Name',
-    apiEndpoint: 'https://api123456.execute-api.us-west-2.amazonaws.com/dev/',
+    apiEndpoint: 'https://api123456.execute-api.us-west-2.amazonaws.com/dev', // 末尾に / を付けない
     apiKey: 'YOUR_TRACKER_API_KEY',
   },
 };
@@ -125,7 +127,7 @@ CSP の無いサイトに限り、`</body>` 直前のインライン script で�
 
 計測したい要素に `data-track="true"` と `data-track-name` を付けます。SDK は親要素をたどって `data-track` を探すので、リンク内のアイコンや文字をクリックしても記録されます。
 
-**計測対象**: すべての CTA、すべてのナビゲーションリンク（ヘッダー・サイドバー・パンくず・フッター・404 ページのトップへ戻るリンクを含む）、すべてのフォーム送信。開閉ボタン等の UI 操作にも付けてかまいません。
+**計測対象**: すべての CTA、すべてのナビゲーションリンク（ヘッダー・サイドバー・パンくず・フッター・404 ページのトップへ戻るリンクを含む）、すべてのフォーム送信。フォーム送信は送信ボタンのクリックで計測します（`<form>` には `data-track` を付けません。理由は下のフォームの例）。開閉ボタン等の UI 操作にも付けてかまいません。
 
 ```tsx
 import { Link } from '@tanstack/react-router';
@@ -140,12 +142,14 @@ import { Link } from '@tanstack/react-router';
     お問い合わせ
 </Link>
 
-{/* フォーム（送信時に form-submit として記録される） */}
-<form data-track="true" data-track-name="signup-form">
+{/* フォーム（送信ボタンに data-track を付ける。<form> には付けない） */}
+<form>
     <input type="email" placeholder="メールアドレス" />
-    <button type="submit">登録</button>
+    <button type="submit" data-track="true" data-track-name="signup-submit">登録</button>
 </form>
 ```
+
+`<form>` に `data-track` を付けると、SDK はフォーム内のクリック（入力欄やラベルなど）も親をたどって form のクリックとして記録するため、送信していなくてもクリック数が水増しされます。送信ボタンに付ければ、送信の操作だけが記録されます。
 
 ## SDK の既知の挙動と対処
 
@@ -446,7 +450,7 @@ const [ref, inView] = useInView({
 **デバッグ方法**:
 1. コンソールで `window.tracker` が存在するか確認する（無ければ下の「トラッカーが初期化されない場合」）
 2. `pnpm dev` では `debug: import.meta.env.DEV` により SDK のログがコンソールに出る
-3. ブラウザの開発者ツールの Network タブで `/v1/events` への POST が 200 になっているか確認する（SDK は 5 秒ごと・10 件たまったとき・ページ離脱時にまとめて送信する）
+3. ブラウザの開発者ツールの Network タブで `/v1/events` への POST が 200 になっているか確認する（SDK は 5 秒ごと・10 件たまったとき・ページ離脱時にまとめて送信する。ただし離脱時の送信は `keepalive` なしの通常の `fetch` のため、離脱直前のイベントは届かないことがある）
 
 ### CORSエラーが発生する場合
 

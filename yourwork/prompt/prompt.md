@@ -16,11 +16,20 @@
 
 <tracker_configuration>
 {以下にデプロイしたMLEWトラッカーのエンドポイント情報を入力してください}
-- **API Endpoint**: `https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/dev/`
+- **API Endpoint**: `https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/dev`
 - **API Key**: dummyapikey
 - **Dashboard URL**: `https://xxxxxxxx.cloudfront.net`
 - **Tracker SDK URL** : `https://xxxxxxxx.cloudfront.net/tracker-sdk.js`
 </tracker_configuration>
+
+- API Endpoint は末尾に `/` を付けません。Tracker のデプロイ完了メールに出る値（`.../dev`）をそのまま使います。
+- **Tracker の値がプレースホルダーのままなら着手しません。** 値に `{` を含む、`xxxxxxxx` や `dummyapikey` が残っている、のどれかに当たるときは、正しい 4 値をユーザーに確認してから進めます。ダミー値のままデプロイすると、計測が飛ばないモックが完成してしまうためです。ユーザーが「Tracker を使わない」と明示したときだけ、Tracker なしで進めます（Phase 1 の手順 6 を参照）。
+- ユーザーが 4 値を控えていない場合は、Tracker のスタックから取り直せます（`<TrackerRegion>` は Tracker をデプロイしたリージョン、`<env>` は Tracker をデプロイしたときの `Environment`。README の手順どおりなら `dev`）。
+  ```bash
+  aws cloudformation describe-stacks --region <TrackerRegion> --stack-name MLEWTrackerStack-<env> --query 'Stacks[0].Outputs'
+  aws apigateway get-api-key --region <TrackerRegion> --api-key <ApiKeyId の値> --include-value --query value --output text
+  ```
+  API Endpoint は `ApiEndpoint` の値そのまま、API Key は `get-api-key` の出力（`ApiKeyId` は ID であってキーではありません）、Dashboard URL は `https://` + `DashboardURL`、Tracker SDK URL は `https://` + `SdkDistributionDomain` + `/tracker-sdk.js` です。
 
 # 成果物
 
@@ -35,7 +44,7 @@
 - Node.js 22.12 以上（または 20.19 以上）。生成物の vite と nx がこれを要求するため、Node 18 では動きません。
 - pnpm。依存が `catalog:` 指定のため、npm では install できません。
 - uv。infra の build に含まれる checkov を `uvx` で実行するため、無いと `uvx: command not found` で build が失敗します。
-- AWS CLI v2 と認証情報。モック本体のデプロイ先リージョンは、デプロイ・削除のコマンドごとに `AWS_REGION=<デプロイ先リージョン>` を付けて明示します（下の Phase 2・削除を参照）。CloudFront 用の WAF は常に us-east-1 の別スタックになります。
+- AWS CLI v2 と認証情報。モック本体のデプロイ先リージョンは Phase 1 の最初に決め、bootstrap・デプロイ・削除のコマンドごとに `AWS_REGION=<デプロイ先リージョン>` を付けて明示します。CloudFront 用の WAF は常に us-east-1 の別スタックになります。
 
 # 実装の方針
 
@@ -61,11 +70,22 @@
   1. autoTrack のページビューは初回表示と戻る・進む（popstate）だけで、Link による遷移は記録されません。`router.history.subscribe` で、action が PUSH / REPLACE のときだけ `trackView` を呼びます。BACK / FORWARD は SDK が記録するので、含めると二重になります。
   2. クリックの page は記録時点の `location.pathname` なので、Link のクリックは遷移先のページとして記録されます。キャプチャ段階のクリックリスナーで、最寄りの `[data-track="true"]` 要素の `data-track-page` に遷移前のパスを入れます（SDK は `data-track-*` をプロパティにし page を上書きします）。
   3. SDK はコンストラクタで初回ページビューを送るため、`setUserId` より先に送られて userId が空になります。SDK を生成する前に `localStorage.setItem('mlew_tracker_userId', visitorId)` で訪問者 ID を書いておきます（SDK は起動時にこのキーから userId を復元します）。
-- **計測対象**: すべての CTA ボタン（購入・申込み・問い合わせなど）、すべてのナビゲーションリンク（ヘッダー・サイドバー・パンくず・フッター・404 の戻るリンクを含む）、すべてのフォーム送信イベント。開閉ボタンなどの UI 操作に付けても構いません。
+- **計測対象**: すべての CTA ボタン（購入・申込み・問い合わせなど）、すべてのナビゲーションリンク（ヘッダー・サイドバー・パンくず・フッター・404 の戻るリンクを含む）、すべてのフォーム送信（`data-track` は `<form>` ではなく送信ボタンに付ける。`<form>` に付けると SDK が親をたどるため、入力欄のクリックまでフォームのクリックとして数えられる）。開閉ボタンなどの UI 操作に付けても構いません。
 
 # 進め方
 
 **Phase 1: インフラ準備（最初に着手）**
+
+最初に、次の 2 点を確認します。
+
+- **`product/` がすでにあるか（再実行）**: あれば、下の生成・改修の手順 1〜6 は飛ばし、`product/construction/plan.md` を読んでデプロイ先リージョンと進捗を引き継ぎます。生成を重ねると既存の成果物と衝突するためです。作り直しが必要と判断したときは、`product/` を消す前にユーザーに確認します。
+- **デプロイ先リージョン**: 次の順に決めます。2 回目以降に別リージョンで合成されると、既存の WAF スタックの export 削除が拒否されて `UPDATE_FAILED` になるため、一度決めた値を使い続けます。
+  1. `product/construction/plan.md` に記録があれば、その値
+  2. 無ければ、`aws configure get region` の値と `$AWS_REGION` の値を候補に、`aws cloudformation describe-stacks --region <候補> --stack-name product-infra-sandbox-Application` で既存のスタックを探し、見つかったリージョン
+  3. 無ければ、`aws configure get region` の値
+  4. それも空なら、ユーザーに尋ねる
+
+  決めた値は `product/construction/plan.md` に記録し（無ければこの時点で作成します）、以降の bootstrap・デプロイ・削除で同じ値を使います。
 
 Nx Plugin for AWS で `product/` に雛形を作ります。次の順番で実行してください。順番を入れ替えると型エラーや build の停止が起きます。
 
@@ -79,7 +99,7 @@ Nx Plugin for AWS で `product/` に雛形を作ります。次の順番で実�
 6. `packages/infra/src/stacks/application-stack.ts` の ApplicationStack に Website を追加する（下のコード）。生成直後の ApplicationStack は空で、追加しないとデプロイしても何も作られません
    - `TRACKER_SDK_ORIGIN` には `<tracker_configuration>` の Tracker SDK URL のスキームとホストだけを入れます（例 `https://xxxxxxxx.cloudfront.net`、パスなし）
    - Tracker 情報が未指定なら `scriptSrc` を省略します。index.html の SDK の script タグも置かず、`config.ts` の `tracker` は空文字で用意します（`mlewTracker.ts` が参照するため）。この場合、コンソールの `MLEW Tracker SDK not loaded` は想定どおりです。あとで追加したら、`AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を再実行して CSP を更新します
-7. アカウントで初めて使う場合だけ `pnpm nx bootstrap infra` を実行する。引数なしの bootstrap は、デプロイ先リージョンと WAF 用の us-east-1 の両方を bootstrap します
+7. アカウント×リージョンごとに初回だけ `AWS_REGION=<デプロイ先リージョン> pnpm nx bootstrap infra` を実行する。bootstrap はリージョン単位なので、事前確認で bootstrap したリージョンと当日のデプロイ先は揃えます。この bootstrap は、デプロイ先リージョンと WAF 用の us-east-1 の両方を bootstrap します
 
 `static-website.ts` の改修:
 
@@ -134,12 +154,12 @@ export class ApplicationStack extends Stack {
 
 **Phase 2: アプリケーション開発**
 
-`product/construction/plan.md` にチェックボックス付きの実装計画を日本語で作成し、実装しながら進捗を更新します。ローカルでは `product/` で `pnpm dev` を実行し、http://localhost:4200 で確認します。本番ビルドの確認は `pnpm nx run @product/website:preview`（http://localhost:4300）で行えます。
+`product/construction/plan.md`（Phase 1 でリージョンを記録したファイル）にチェックボックス付きの実装計画を日本語で書き、実装しながら進捗を更新します。ローカルでは `product/` で `pnpm dev` を実行し、http://localhost:4200 で確認します。本番ビルドの確認は `pnpm nx run @product/website:preview`（http://localhost:4300）で行えます。
 
 実装が固まったら、`product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx deploy-sandbox infra` を実行して AWS にデプロイします。初回は 4 分ほどかかります。
 
-- **リージョンは毎回明示します。** CDK はプロファイルの既定リージョンより環境変数 `AWS_REGION` を優先します。エージェントのシェルには、エージェント自身の設定に由来する `AWS_REGION` が入っていることがあり、そのままだと意図しないリージョンへデプロイされます。2 回目以降に別リージョンで合成されると、既存の WAF スタックの export 削除が拒否されて `UPDATE_FAILED` になります。
-- `<デプロイ先リージョン>` は、`product-infra-sandbox-Application` がすでにあればそのリージョン、無ければ `aws configure get region` の値を使います。決めたリージョンは `product/construction/plan.md` に書き、以降のデプロイ・削除で同じ値を使います。デプロイ後の URL は、CDK の Outputs に出る `...WebsiteDistributionDomainName...` の値（`xxxx.cloudfront.net`）です。あとから確認するときは `aws cloudformation describe-stacks --region <デプロイ先リージョン> --stack-name product-infra-sandbox-Application --query 'Stacks[0].Outputs'` を使います。
+- **リージョンは毎回明示します。** `<デプロイ先リージョン>` は Phase 1 で決めて `product/construction/plan.md` に記録した値です。CDK はプロファイルの既定リージョンより環境変数 `AWS_REGION` を優先します。エージェントのシェルには、エージェント自身の設定に由来する `AWS_REGION` が入っていることがあり、そのままだと意図しないリージョンへデプロイされます。
+- デプロイ後の URL は、CDK の Outputs に出る `...WebsiteDistributionDomainName...` の値（`xxxx.cloudfront.net`）です。あとから確認するときは `aws cloudformation describe-stacks --region <デプロイ先リージョン> --stack-name product-infra-sandbox-Application --query 'Stacks[0].Outputs'` を使います。
 
 # 完了条件
 
@@ -156,5 +176,9 @@ export class ApplicationStack extends Stack {
 ユーザーから明示的な削除指示があった場合にのみ実行します。デプロイしたままだと WAF と KMS キーの固定費（約 $8/月）がかかり続けます。
 
 1. `product/` で `AWS_REGION=<デプロイ先リージョン> pnpm nx destroy-sandbox infra -- --force` を実行する。`destroy-sandbox` の中身は確認付きの `cdk destroy` で、TTY の無いエージェントのシェルでは確認できずに `TtyNotAttached` で失敗するため、`--force` を付けます（`--` の後ろが cdk に渡ります）。バケットは autoDeleteObjects 付きなので、手で空にする必要はありません
-2. デプロイ先リージョンと us-east-1 の両方で `aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE` を実行し、`product-infra-sandbox-` で始まるスタックが残っていないことを確認する。WAF のスタックは us-east-1 にあるため、デプロイ先だけ見ると取り残しに気付けません
+2. デプロイ先リージョンと us-east-1 の両方で次を実行し、出力が空であることを確認する。WAF のスタックは us-east-1 にあるため、デプロイ先だけ見ると取り残しに気付けません。状態で絞り込まず存在で確認するのは、`DELETE_FAILED` や `UPDATE_ROLLBACK_COMPLETE` のスタックを見落とさないためです
+   ```bash
+   aws cloudformation describe-stacks --region <デプロイ先リージョン> --query "Stacks[?starts_with(StackName,'product-infra-sandbox-')].[StackName,StackStatus]" --output table
+   aws cloudformation describe-stacks --region us-east-1 --query "Stacks[?starts_with(StackName,'product-infra-sandbox-')].[StackName,StackStatus]" --output table
+   ```
 3. KMS キーは 7 日後に削除されます。削除待ちの間は課金されません
