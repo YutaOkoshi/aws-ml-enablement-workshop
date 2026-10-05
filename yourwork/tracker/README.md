@@ -94,7 +94,7 @@ aws apigateway get-api-key --region <Tracker のリージョン> \
 aws cloudformation delete-stack --region <Tracker のリージョン> --stack-name mlew-tracker-stack
 ```
 
-子スタックの削除は非同期で 10〜20 分かかります。次のコマンドが `does not exist` のエラーを返せば完了です。
+子スタックの削除は非同期で進み、数分（実測 3 分）〜20 分かかります。次のコマンドが `does not exist` のエラーを返せば完了です。
 
 ```bash
 aws cloudformation describe-stacks --region <Tracker のリージョン> \
